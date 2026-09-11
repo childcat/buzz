@@ -109,6 +109,53 @@
 5. 문서 두 곳 stale: `docs/welcome-kickoff-silent-failures.md:408`(§1 참조),
    `docs/nips/NIP-AO.md:125`(구현된 제어 타입 3종 미반영).
 
+## 6-b. 모바일(핸드폰)에서 가능한 통제 수단
+
+### 가능
+
+1. **DM으로 오너 제어 명령 — 폰에서 유효한 유일한 직접 제어 경로.**
+   DM 채널은 본문에 `@Name`이 없어도 수신자 `p` 태그가 자동 부착된다
+   (`mobile/lib/features/channels/message_mention_pubkeys.dart:17`,
+   `mobile/lib/features/channels/send_message_provider.dart:69-95`), 전송 kind는 9
+   (`mobile/lib/shared/relay/nostr_models.dart:21`).
+   따라서 에이전트와의 1:1 DM에서 본문을 **정확히** `!shutdown` / `!cancel` / `!rotate`만 보내면
+   §1의 세 조건(kind 9 + 정확 일치 + 별도 `p` 태그)을 모두 만족한다.
+   기본 구독 모드가 `mentions`(`crates/buzz-acp/src/config.rs:331`, 필터는 `:1358`에서 kind 9 + `#p`)
+   이므로 DM의 `p` 태그 덕에 이벤트가 하네스에 도달한다.
+   - `!shutdown` → 스코프 무관 프로세스 종료. **폰에서 쓸 수 있는 실질적 kill switch**
+     (원격/K8s 에이전트의 공식 정지 경로와 동일).
+   - `!cancel` / `!rotate` → DM은 항상 conversation 스코프(`crates/buzz-acp/src/scope.rs:132`)이므로
+     **DM 대화의 턴만** 취소/회전된다. 다른 채널에서 돌고 있는 턴은 영향 없음.
+   - 채널 컴포저로는 불가: 멘션 선택 시 본문에 `@Name `이 삽입되고
+     (`compose_bar_widget.dart:388-401`), `p` 태그는 본문에 그 텍스트가 남아 있는 멘션만 부착된다
+     (`:472-475` `hasMention` 필터) → 정확 일치 조건이 깨진다.
+   - ⚠️ 이 DM 경로는 **코드 경로 정합성**으로 도출한 결론이며, 이를 고정하는 테스트는 찾지 못했다.
+     실기 검증 + 회귀 테스트 추가가 후속 작업 후보(§1의 stale 문서 갱신과 함께).
+2. **스티어링(가장 실용적).** 기본 `multiple_event_handling = steer`
+   (`crates/buzz-acp/src/config.rs:375`, 테스트 `:2724`) → 작업 중인 에이전트에게 평범한 메시지를
+   보내면 진행 중 턴을 취소하고 새 지시를 엮어 재디스패치한다. 폰에서 그냥 말을 걸면 된다.
+3. **채널에서 에이전트 제거.** `mobile/lib/features/channels/members_sheet.dart:378` →
+   `channel_management_actions.dart:303` (kind 9001). ACP가 멤버십 제거를 감지해 큐 드레인 +
+   세션 무효화(`crates/buzz-acp/src/lib.rs:3330` 부근).
+4. **관찰(읽기 전용).** kind 24200 텔레메트리를 복호화해 라이브 트랜스크립트 표시
+   (`mobile/lib/features/channels/agent_activity/observer_subscription.dart:137`,
+   `agent_activity_sheet.dart`), working bots 표시(`working_bots_provider.dart`).
+
+### 불가 (폰에 없음)
+
+- **옵저버 제어 프레임 전송**(`cancel_turn` / `switch_model` /
+  `publish_project_owner_announcements`) — 모바일에 전송 코드가 없다(`"control"`·`cancel_turn` 그렙 0건).
+  데스크톱 전용(`desktop/src/shared/api/agentControl.ts`).
+- **런타임 start / stop / restart / deploy** — Tauri 커맨드라 데스크톱 전용.
+  즉 **폰에서는 에이전트를 켤 수 없다**(DM `!shutdown`으로 끄는 것만 가능).
+- **모더레이션 ban / timeout**(9040/9042) — 모바일 미구현. CLI(`buzz moderation`) 또는 다른 표면 필요.
+- **워크플로 승인** — 모바일은 "승인 대기" 알림만 표시(`mobile/lib/features/activity/feed_item.dart:87`,
+  kind 46010), 승인 grant(46030) 전송 없음.
+- **respond_to / 모델 등 설정 변경** — 모바일에 에이전트 설정 UI 없음.
+
+### 우회
+폰에서 터미널(SSH 등)로 `buzz` CLI를 쓸 수 있다면 §1의 `--mention` 경로로 **채널 단위** `!cancel`까지 가능하다.
+
 ## 7. 다음 작업자를 위한 재현/검증 경로
 
 - 오너 명령 경로 테스트: `crates/buzz-acp/src/lib.rs`의 `is_owner_control_command` 주변 유닛 테스트,
