@@ -156,6 +156,32 @@
 ### 우회
 폰에서 터미널(SSH 등)로 `buzz` CLI를 쓸 수 있다면 §1의 `--mention` 경로로 **채널 단위** `!cancel`까지 가능하다.
 
+## 6-c. 웹에서 가능한 통제 수단
+
+**결론: 웹에는 에이전트 통제 UI가 전혀 없다.** 리포의 웹 번들 두 개는 용도가 다르다.
+
+- `web/` — 릴레이가 서빙하는 공개 브라우저 클라이언트. 라우트가
+  `index`, `invite.$code`, `repos.$repoId(.blob)` 뿐(`web/src/app/routes/`), 기능은
+  `features/repos` + `features/invite`. 채널·메시지·에이전트 UI 자체가 없다.
+  `VISION.md:81`도 "browser web client (the repo browser)"로 한정한다.
+- `admin-web/` — 운영자 콘솔(`/api/admin/v1`, 관리 호스트에서만 서빙, `router.rs:61,174`).
+  NIP-07 확장으로 NIP-98 서명 인증(`admin-web/src/api.ts`). 화면은 모더레이션 리포트 조회 +
+  제품 피드백 상태 변경. **에이전트 제어 없음**이며, 집행 액션(`reports/{id}/resolve`의
+  delete|kick|ban|timeout, `api/admin/mod.rs:496`)은 릴레이 API에는 있어도 현재 UI에는
+  호출이 없다(`App.tsx`에 resolve/mutate 호출 부재).
+
+### 프로토콜은 웹에서 도달 가능 — UI만 없다
+
+- `POST /events`(`crates/buzz-relay/src/router.rs:73`, NIP-98 인증)는 서명 이벤트를 받고,
+  **kind 9가 HTTP 허용 스코프에 있다**(`ingest.rs:473` → `Scope::MessagesWrite`).
+  → 브라우저에서 NIP-07으로 서명한 `!shutdown`/`!cancel`/`!rotate`(정확 본문 + 에이전트 `p` 태그)를
+  보낼 수 있다. 즉 오너 제어 패널을 웹 페이지로 만드는 것은 지금 스택으로 즉시 가능하다.
+  모더레이션 ban/timeout(9040/9042)도 같은 경로로 가능(allowlist 테스트 `ingest.rs:3872` 목록).
+- **옵저버 제어 프레임(24200)은 HTTP로 불가** — ephemeral kind는 HTTP 스코프 허용 목록에서
+  제외되며 그 사실이 테스트로 고정되어 있다(`ingest.rs:3868`
+  `ephemeral_kinds_not_in_scope_allowlist`). WebSocket + NIP-42 경로에서만 수락되므로
+  (`handlers/event.rs`) 브라우저가 WS로 직접 붙으면 가능하지만, 리포에 그런 웹 클라이언트는 없다.
+
 ## 7. 다음 작업자를 위한 재현/검증 경로
 
 - 오너 명령 경로 테스트: `crates/buzz-acp/src/lib.rs`의 `is_owner_control_command` 주변 유닛 테스트,
